@@ -71,7 +71,8 @@ class Client:
     """Implicit wrapper of either a `JSONRPCClient` or a `LegacyClient`."""
 
     def __init__(self, uri: str | None = None, reserved_ports=False, private_methods=False, py_exceptions=False,
-                 log_py_exceptions=False, call_timeout: float | UndefinedType = undefined, verify_ssl=True):
+                 log_py_exceptions=False, call_timeout: float | UndefinedType = undefined, verify_ssl=True,
+                 cloudflare_access_client_id: str | None = None, cloudflare_access_client_secret: str | None = None):
         """Initialize either a `JSONRPCClient` or a `LegacyClient`.
 
         Use `JSONRPCClient` unless `uri` ends with '/websocket'.
@@ -99,7 +100,7 @@ class Client:
         self.uri_check(uri, py_exceptions)
 
         self.__client = client_class(uri, reserved_ports, private_methods, py_exceptions, log_py_exceptions,
-                                     call_timeout, verify_ssl)
+                                     call_timeout, verify_ssl, cloudflare_access_client_id, cloudflare_access_client_secret)
 
     def uri_check(self, uri: str | None, py_exceptions: bool):
         # We pickle_load when handling py_exceptions, reduce risk of MITM on client causing a pickle.load
@@ -123,7 +124,8 @@ class WSClient:
     The object used by `JSONRPCClient` to send and receive data.
 
     """
-    def __init__(self, url: str, *, client: 'JSONRPCClient', reserved_ports: bool = False, verify_ssl: bool = True):
+    def __init__(self, url: str, *, client: 'JSONRPCClient', reserved_ports: bool = False, verify_ssl: bool = True,
+                 header: dict | None = None):
         """Initialize a `WSClient`.
 
         Args:
@@ -137,6 +139,7 @@ class WSClient:
         self.client = client
         self.reserved_ports = reserved_ports
         self.verify_ssl = verify_ssl
+        self.header = header
 
         self.socket: socket.socket
         self.app: WebSocketApp
@@ -176,6 +179,7 @@ class WSClient:
             on_message=self._on_message,
             on_error=self._on_error,
             on_close=self._on_close,
+            header=self.header,
         )
         Thread(daemon=True, target=self.app.run_forever).start()
 
@@ -398,7 +402,8 @@ class JSONRPCClient:
 
     """
     def __init__(self, uri: str | None = None, reserved_ports=False, private_methods=False, py_exceptions=False,
-                 log_py_exceptions=False, call_timeout: float | UndefinedType = undefined, verify_ssl=True):
+                 log_py_exceptions=False, call_timeout: float | UndefinedType = undefined, verify_ssl=True,
+                 cloudflare_access_client_id: str | None = None, cloudflare_access_client_secret: str | None = None):
         """Initialize a `JSONRPCClient`.
 
         Args:
@@ -437,11 +442,17 @@ class JSONRPCClient:
         self._connected = Event()
         self._connection_error: str | None = None
         self._ws_connection_error: WebSocketException
+        header = {}
+        if cloudflare_access_client_id is not None:
+            header['CF-Access-Client-Id'] = cloudflare_access_client_id
+        if cloudflare_access_client_secret is not None:
+            header['CF-Access-Client-Secret'] = cloudflare_access_client_secret
         self._ws = WSClient(
             uri,
             client=self,
             reserved_ports=reserved_ports,
             verify_ssl=verify_ssl,
+            header=header,
         )
         self._ws.connect()
         self._connected.wait(10)
@@ -1026,7 +1037,8 @@ def main():
 
     if args.name == 'call':
         try:
-            with Client(uri=args.uri) as c:
+            with Client(uri=args.uri, cloudflare_access_client_id=args.cloudflare_access_client_id,
+                        cloudflare_access_client_secret=args.cloudflare_access_client_secret) as c:
                 try:
                     if args.username and args.password:
                         if not c.call('auth.login', args.username, args.password):

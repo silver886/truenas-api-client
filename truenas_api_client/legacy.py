@@ -28,11 +28,12 @@ logger = logging.getLogger(__name__)
 
 
 class WSClient:
-    def __init__(self, url, *, client, reserved_ports=False, verify_ssl=True):
+    def __init__(self, url, *, client, reserved_ports=False, verify_ssl=True, header: dict | None = None):
         self.url = url
         self.client = client
         self.reserved_ports = reserved_ports
         self.verify_ssl = verify_ssl
+        self.header = header
 
         self.socket = None
         self.app = None
@@ -67,6 +68,7 @@ class WSClient:
             on_message=self._on_message,
             on_error=self._on_error,
             on_close=self._on_close,
+            header=self.header,
         )
         Thread(daemon=True, target=self.app.run_forever).start()
 
@@ -179,7 +181,8 @@ class Job:
 
 class LegacyClient:
     def __init__(self, uri=None, reserved_ports=False, private_methods=False, py_exceptions=False,
-                 log_py_exceptions=False, call_timeout: float | UndefinedType = undefined, verify_ssl=True):
+                 log_py_exceptions=False, call_timeout: float | UndefinedType = undefined, verify_ssl=True,
+                 cloudflare_access_client_id: str | None = None, cloudflare_access_client_secret: str | None = None):
         """
         Arguments:
            :reserved_ports(bool): should the local socket used a reserved port
@@ -202,11 +205,17 @@ class LegacyClient:
         self._closed = Event()
         self._connected = Event()
         self._connection_error = None
+        header = {}
+        if cloudflare_access_client_id is not None:
+            header['CF-Access-Client-Id'] = cloudflare_access_client_id
+        if cloudflare_access_client_secret is not None:
+            header['CF-Access-Client-Secret'] = cloudflare_access_client_secret
         self._ws = WSClient(
             uri,
             client=self,
             reserved_ports=reserved_ports,
             verify_ssl=verify_ssl,
+            header=header,
         )
         self._ws.connect()
         self._connected.wait(10)
