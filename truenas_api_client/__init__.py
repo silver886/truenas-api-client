@@ -991,6 +991,10 @@ def get_parser():
     iparser.add_argument('-n', '--number', type=int, help='Number of events to wait before exit')
     iparser.add_argument('-t', '--timeout', type=int)
 
+    # Cloudflare Access options
+    parser.add_argument('-I', '--cloudflare-access-client-id')
+    parser.add_argument('-S', '--cloudflare-access-client-secret')
+
     return parser
 
 
