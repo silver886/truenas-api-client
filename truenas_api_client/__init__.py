@@ -39,6 +39,7 @@ import pickle
 import pprint
 import random
 import socket
+import struct
 import sys
 from threading import Event, Lock, Thread
 import time
@@ -48,7 +49,7 @@ import uuid
 
 import ssl
 from websocket import WebSocketApp
-from websocket._abnf import STATUS_NORMAL
+from websocket._abnf import ABNF, STATUS_NORMAL
 from websocket._exceptions import WebSocketException, WebSocketConnectionClosedException
 from websocket._http import connect, proxy_info
 from websocket._socket import sock_opt
@@ -254,10 +255,25 @@ class WSClient:
     def _on_error(self, app, e):
         """Callback passed to the `WebSocketApp` to execute when an error occurs.
 
-        Log the error.
+        Handle ABNF frames and other errors.
 
         """
-        logger.warning("Websocket client error: %r", e)
+        code = None
+        reason = 'UNKNOWN'
+        if isinstance(e, ABNF):
+            # Always try to extract whatever information is available from the ABNF object
+            try:
+                # If there's data, try to extract code and reason (typically for close frames)
+                if e.data and len(e.data) >= 2:
+                    code = struct.unpack('!H', e.data[:2])[0]
+                reason = e.data[2:].decode('utf-8', errors='ignore')
+            except Exception:
+                pass
+
+            # Always call on_close with whatever information we could extract
+            self.client.on_close(code, reason)
+            return
+
         self.client._ws_connection_error = e
 
     def _on_close(self, app, code, reason):
@@ -455,7 +471,7 @@ class JSONRPCClient:
             header=header,
         )
         self._ws.connect()
-        self._connected.wait(10)
+        self._connected.wait(30)
         if not self._connected.is_set():
             raise ClientException('Failed connection handshake')
         if hasattr(self, '_ws_connection_error'):
@@ -531,7 +547,8 @@ class JSONRPCClient:
                         if params['collection'] in self._event_callbacks:
                             for event in self._event_callbacks[params['collection']]:
                                 if 'error' in params:
-                                    event['error'] = params['error']['reason'] or params['error']
+                                    err = params['error']
+                                    event['error'] = reason if err and (reason := err['reason']) else err
                                 event['event'].set()
                     case _:
                         logger.error('Received unknown notification %r', message['method'])
